@@ -1,4 +1,3 @@
-
 BUILD_SUBDIRS = threads userprog vm filesys
 
 all::
@@ -10,7 +9,7 @@ CLEAN_SUBDIRS = $(BUILD_SUBDIRS) examples utils
 clean::
 	for d in $(CLEAN_SUBDIRS); do $(MAKE) -C $$d $@; done
 	rm -f TAGS tags
-	
+
 distclean:: clean
 	find . -name '*~' -exec rm '{}' \;
 
@@ -28,7 +27,3 @@ cscope.files::
 
 cscope:: cscope.files
 	cscope -b -q -k
-
-check::
-	$(MAKE) -C tests $@
->>>>>>> f6da6bb4bb8cd27804d56692694d21aa650872c1
