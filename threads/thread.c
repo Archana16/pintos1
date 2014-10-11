@@ -117,18 +117,6 @@ void thread_start(void) {
  Thus, this function runs in an external interrupt context. */
 void thread_tick(void) {
 	struct thread *t = thread_current();
-	struct list_elem *thread_ele = list_begin(&sleeping_threads);
-
-	for (thread_ele = sleeping_threads.head.next; thread_ele->next != NULL;) {
-		struct thread *t = list_entry(thread_ele, struct thread, elem);
-		if (timer_elapsed(t->begin) >= t->ticks_to_sleep) {
-			thread_ele = list_remove(&t->elem);
-			thread_unblock(t);
-		} else {
-			thread_ele = thread_ele->next;
-		}
-	}
-
 	/* Update statistics. */
 	if (t == idle_thread)
 		idle_ticks++;
@@ -234,7 +222,9 @@ void thread_unblock(struct thread *t) {
 
 	old_level = intr_disable();
 	ASSERT(t->status == THREAD_BLOCKED);
-	list_push_back(&ready_list, &t->elem);
+	//list_push_back(&ready_list, &t->elem);
+	//keep the ready list sorted according by the thread priorities
+	list_insert_ordered(&ready_list, &t->elem,(list_less_func *) &priority_comparison,NULL);
 	t->status = THREAD_READY;
 	intr_set_level(old_level);
 }
@@ -297,8 +287,10 @@ void thread_yield(void) {
 	ASSERT(!intr_context());
 
 	old_level = intr_disable();
+	//insert in increasing  order of priority
+	//list_push_back(&ready_list, &cur->elem);
 	if (cur != idle_thread)
-		list_push_back(&ready_list, &cur->elem);
+		list_insert_ordered(&ready_list, &cur->elem,(list_less_func *) &priority_comparison,NULL);
 	cur->status = THREAD_READY;
 	schedule();
 	intr_set_level(old_level);
@@ -538,3 +530,28 @@ static tid_t allocate_tid(void) {
 /* Offset of `stack' member within `struct thread'.
  Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
+
+//function to wake up threads --archana
+void wakeup_threads(void) {
+	struct thread *t = thread_current();
+	struct list_elem *thread_ele = list_begin(&sleeping_threads);
+	for (thread_ele = sleeping_threads.head.next; thread_ele->next != NULL;) {
+		struct thread *t = list_entry(thread_ele, struct thread, elem);
+		if (timer_elapsed(t->begin) >= t->ticks_to_sleep) {
+			thread_ele = list_remove(&t->elem);
+			thread_unblock(t);
+		} else {
+			thread_ele = thread_ele->next;
+		}
+	}
+}
+
+//compare priority for insert sort of the ready list --archana
+bool priority_comparison(const struct list_elem *ele1, const struct list_elem *ele2, void *aux UNUSED) {
+	struct thread *thread1 = list_entry(ele1, struct thread, elem);
+	struct thread *thread2 = list_entry(ele2, struct thread, elem);
+	if (thread1->priority > thread2->priority) {
+		return true;
+	}
+	return false;
+}

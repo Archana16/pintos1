@@ -142,6 +142,12 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+//function to wake up threads
+void wakeup_threads(void);
+
+//function to compare priorities of threads
+bool priority_comparison(const struct list_elem *, const struct list_elem *, void *aux) ;
+
 struct list sleeping_threads;
 
 #endif /* threads/thread.h */
