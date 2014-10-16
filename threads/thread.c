@@ -90,6 +90,7 @@ void thread_init(void) {
 	list_init(&ready_list);
 	list_init(&all_list);
 	list_init(&sleeping_threads);
+	list_init(&lock_list);
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread();
@@ -189,7 +190,10 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 
 	/* Add to run queue. */
 	thread_unblock(t);
-
+	enum intr_level old_level;
+	old_level = intr_disable ();
+	test_max_priority();
+	intr_set_level (old_level);
 	return tid;
 }
 
@@ -224,7 +228,8 @@ void thread_unblock(struct thread *t) {
 	ASSERT(t->status == THREAD_BLOCKED);
 	//list_push_back(&ready_list, &t->elem);
 	//keep the ready list sorted according by the thread priorities
-	list_insert_ordered(&ready_list, &t->elem,(list_less_func *) &priority_comparison,NULL);
+	list_insert_ordered(&ready_list, &t->elem,
+			(list_less_func *) &priority_comparison, NULL);
 	t->status = THREAD_READY;
 	intr_set_level(old_level);
 }
@@ -290,7 +295,8 @@ void thread_yield(void) {
 	//insert in increasing  order of priority
 	//list_push_back(&ready_list, &cur->elem);
 	if (cur != idle_thread)
-		list_insert_ordered(&ready_list, &cur->elem,(list_less_func *) &priority_comparison,NULL);
+		list_insert_ordered(&ready_list, &cur->elem,
+				(list_less_func *) &priority_comparison, NULL);
 	cur->status = THREAD_READY;
 	schedule();
 	intr_set_level(old_level);
@@ -312,7 +318,16 @@ void thread_foreach(thread_action_func *func, void *aux) {
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority) {
-	thread_current()->priority = new_priority;
+	ASSERT(new_priority <= PRI_MAX && new_priority >= PRI_MIN);
+	struct thread *current = thread_current();
+	if (current->priority <= current->old_priority)
+		current->priority = new_priority;
+	current->old_priority = new_priority;
+
+	if (!intr_context() && !list_empty(&ready_list)
+			&& list_entry(list_front(&ready_list), struct thread, elem)->priority
+					> current->priority)
+		thread_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -419,6 +434,7 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	strlcpy(t->name, name, sizeof t->name);
 	t->stack = (uint8_t *) t + PGSIZE;
 	t->priority = priority;
+	t->old_priority = priority;
 	t->magic = THREAD_MAGIC;
 
 	old_level = intr_disable();
@@ -547,11 +563,28 @@ void wakeup_threads(void) {
 }
 
 //compare priority for insert sort of the ready list --archana
-bool priority_comparison(const struct list_elem *ele1, const struct list_elem *ele2, void *aux UNUSED) {
+bool priority_comparison(const struct list_elem *ele1,
+		const struct list_elem *ele2, void *aux UNUSED) {
 	struct thread *thread1 = list_entry(ele1, struct thread, elem);
 	struct thread *thread2 = list_entry(ele2, struct thread, elem);
 	if (thread1->priority > thread2->priority) {
 		return true;
 	}
 	return false;
+}
+void test_max_priority(void) {
+	if (list_empty(&ready_list)) {
+		return;
+	}
+	struct thread *t = list_entry(list_front(&ready_list), struct thread, elem);
+	if (intr_context()) {
+		thread_ticks++;
+		if (thread_current()->priority < t->priority|| (thread_ticks >= TIME_SLICE && thread_current()->priority == t->priority)) {
+			intr_yield_on_return();
+		}
+		return;
+	}
+	if (thread_current()->priority < t->priority) {
+		thread_yield();
+	}
 }

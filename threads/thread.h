@@ -88,6 +88,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int old_priority; // donated prirority
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -147,6 +148,7 @@ void wakeup_threads(void);
 
 //function to compare priorities of threads
 bool priority_comparison(const struct list_elem *, const struct list_elem *, void *aux) ;
+void test_max_priority(void);
 
 struct list sleeping_threads;
 
