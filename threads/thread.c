@@ -90,7 +90,6 @@ void thread_init(void) {
 	list_init(&ready_list);
 	list_init(&all_list);
 	list_init(&sleeping_threads);
-	list_init(&lock_list);
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread();
@@ -192,7 +191,7 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 	thread_unblock(t);
 	enum intr_level old_level;
 	old_level = intr_disable ();
-	test_max_priority();
+	alter_readyList();
 	intr_set_level (old_level);
 	return tid;
 }
@@ -572,7 +571,9 @@ bool priority_comparison(const struct list_elem *ele1,
 	}
 	return false;
 }
-void test_max_priority(void) {
+void alter_readyList(void) {
+	//this function makes sure every time a higher priority thread is scheduled
+	//by making the lower priority thread yield immediately - archana
 	if (list_empty(&ready_list)) {
 		return;
 	}

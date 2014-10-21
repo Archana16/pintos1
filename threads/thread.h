@@ -98,6 +98,7 @@ struct thread
     int64_t begin;
     int64_t ticks_to_sleep;
 
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -143,12 +144,12 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
-//function to wake up threads
+//function to wake up threads -archana
 void wakeup_threads(void);
-
-//function to compare priorities of threads
+//function to compare priorities of threads - archana
 bool priority_comparison(const struct list_elem *, const struct list_elem *, void *aux) ;
-void test_max_priority(void);
+//function to yield the lower priority thread immediately-archana
+void alter_readyList(void);
 
 struct list sleeping_threads;
 

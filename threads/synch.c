@@ -103,7 +103,9 @@ void sema_up(struct semaphore *sema) {
 
 	old_level = intr_disable();
 	if (!list_empty(&sema->waiters))
-		thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread,elem));
+		thread_unblock(
+				list_entry(list_pop_front(&sema->waiters), struct thread,
+						elem));
 	sema->value++;
 	intr_set_level(old_level);
 }
@@ -156,9 +158,9 @@ static void sema_test_helper(void *sema_) {
  instead of a lock. */
 void lock_init(struct lock *lock) {
 	ASSERT(lock != NULL);
-
 	lock->holder = NULL;
 	sema_init(&lock->semaphore, 1);
+	list_init(&lock->lock_list);
 }
 
 /* Acquires LOCK, sleeping until it becomes available if
@@ -169,22 +171,35 @@ void lock_init(struct lock *lock) {
  interrupt handler.  This function may be called with
  interrupts disabled, but interrupts will be turned back on if
  we need to sleep. */
+bool sort_new_thread_priority(struct list_elem *elem1,struct list_elem *elem2,void *aux)
+{
+		struct lock_list_element *l1 = list_entry (elem1, struct lock_list_element, elem);
+		struct lock_list_element *l2 = list_entry (elem2, struct lock_list_element, elem);
+		return l1->new_thread_priority > l2->new_thread_priority;
+}
 void lock_acquire(struct lock *lock) {
 	ASSERT(lock != NULL);
 	ASSERT(!intr_context());
 	ASSERT(!lock_held_by_current_thread(lock));
-	struct thread * cur = thread_current();
 	//check if donation required
-	if (lock->holder != NULL) { //some other thread is holding lock
-		if (lock->holder->priority < cur->priority) {
-			//cur thread has higher priority, therefore donate priority
-			lock->holder->priority = cur->priority;
-			struct lock_element *newlock = (struct lock_element*) malloc(
-					sizeof(struct lock_element));
-			newlock->lock = lock;
-			list_push_back(&lock_list, &newlock->elem);
+	enum intr_level old_level;
+	old_level = intr_disable();
+	if (lock->semaphore.value == 0) {
+		struct lock_list_element node;
+		node.new_thread_priority = thread_current()->priority;
+		if (lock->holder->priority < thread_current()->priority) {
+			node.donate_to = lock->holder; //save the thread which upgrades
+			node.old_thread_priority = lock->holder->priority; //save the lock holder's priority
+			lock->holder->priority = thread_current()->priority; //upgrade the holder's priority
+		} else {
+			node.donate_to = NULL; //in the case donation is not required
 		}
+		//insert the element in the lock's list;
+		list_insert_ordered(&lock->lock_list, &node.elem, (list_less_func *) &sort_new_thread_priority,
+				NULL);
 	}
+	alter_readyList();
+	intr_set_level(old_level);
 	sema_down(&lock->semaphore);
 	lock->holder = thread_current();
 }
@@ -215,33 +230,24 @@ bool lock_try_acquire(struct lock *lock) {
 void lock_release(struct lock *lock) {
 	ASSERT(lock != NULL);
 	ASSERT(lock_held_by_current_thread(lock));
-
-	bool donating = false;
-	bool yield = false;
-	struct list_elem *e;
-	struct lock_element *l;
-	for (e = list_begin(&lock_list); e != list_end(&lock_list);e = list_next(e)) {
-		l = list_entry(e, struct lock_element, elem);
-		if (l->lock->holder == lock->holder && l->lock != lock) {
-			//same thread holding different locks
-			donating = true;
-			break;
+	enum intr_level old_level;
+	old_level = intr_disable();
+	//restore the priorities
+	if (list_size(&lock->lock_list) > 0) {
+		//always the highest priority thread finishes execution and then releases lock first
+		//therefore we fetch the first element from the lock's list as the list sorted
+		struct lock_list_element* node = list_entry(
+				list_pop_front(&lock->lock_list), struct lock_list_element,
+				elem);
+		//using this stored data we set back the releasing thread's priority if needed
+		if (node->donate_to != NULL) {
+			node->donate_to->priority = node->old_thread_priority;
 		}
-		if (l->lock->holder == lock->holder && l->lock == lock) {
-			/* L: try to releaze a lock in lock_list, donation is over */
-			donating = false;
-			list_remove(e);
-			break;
-		}
-	}
-	/* L: If still donating, that is exist some elem in lock_list.
-	 * keep the priority. else restore the priority.
-	 * if restores to a lower pri, yield plz. */
-	if (!donating) {
-		thread_current()->priority = thread_current()->old_priority;
-	}
 
+	}
 	lock->holder = NULL;
+	alter_readyList();
+	intr_set_level(old_level);
 	sema_up(&lock->semaphore);
 }
 

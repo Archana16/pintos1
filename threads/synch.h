@@ -20,14 +20,17 @@ void sema_self_test(void);
 struct lock {
 	struct thread *holder; /* Thread holding lock (for debugging). */
 	struct semaphore semaphore; /* Binary semaphore controlling access. */
+	struct list lock_list;
 };
 /* Elem in a list */
-struct lock_element {
-	struct lock *lock; /* This lock */
-	struct list_elem elem; /* List element */
+struct lock_list_element
+{
+	struct thread * donate_to;/* thread that gets upgraded */
+	int new_thread_priority; /* priority of current thread */
+	int old_thread_priority; /* priority before donation */
+	struct list_elem elem;
+
 };
-//lock list stores infomation regarding donation- which thread holds what lock
-struct list lock_list;
 
 void lock_init(struct lock *);
 void lock_acquire(struct lock *);
@@ -44,6 +47,9 @@ void cond_init(struct condition *);
 void cond_wait(struct condition *, struct lock *);
 void cond_signal(struct condition *, struct lock *);
 void cond_broadcast(struct condition *, struct lock *);
+
+//to sort the elements of the lock's list
+bool sort_new_thread_priority(struct list_elem *elem1,struct list_elem *elem2,void *aux);
 
 /* Optimization barrier.
 
