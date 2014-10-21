@@ -63,7 +63,8 @@ void sema_down(struct semaphore *sema) {
 
 	old_level = intr_disable();
 	while (sema->value == 0) {
-		list_push_back(&sema->waiters, &thread_current()->elem);
+		//list_push_back(&sema->waiters, &thread_current()->elem);
+		list_insert_ordered (&sema->waiters, &thread_current ()->elem,(list_less_func *) &priority_comparison, NULL);
 		thread_block();
 	}
 	sema->value--;
@@ -184,21 +185,23 @@ void lock_acquire(struct lock *lock) {
 	//check if donation required
 	enum intr_level old_level;
 	old_level = intr_disable();
-	if (lock->semaphore.value == 0) {
-		struct lock_list_element node;
-		node.new_thread_priority = thread_current()->priority;
-		if (lock->holder->priority < thread_current()->priority) {
-			node.donate_to = lock->holder; //save the thread which upgrades
-			node.old_thread_priority = lock->holder->priority; //save the lock holder's priority
-			lock->holder->priority = thread_current()->priority; //upgrade the holder's priority
-		} else {
-			node.donate_to = NULL; //in the case donation is not required
+	if(!thread_mlfqs){
+		if (lock->semaphore.value == 0) {
+			struct lock_list_element node;
+			node.new_thread_priority = thread_current()->priority;
+			if (lock->holder->priority < thread_current()->priority) {
+				node.donate_to = lock->holder; //save the thread which upgrades
+				node.old_thread_priority = lock->holder->priority; //save the lock holder's priority
+				lock->holder->priority = thread_current()->priority; //upgrade the holder's priority
+			} else {
+				node.donate_to = NULL; //in the case donation is not required
+			}
+			//insert the element in the lock's list;
+			list_insert_ordered(&lock->lock_list, &node.elem, (list_less_func *) &sort_new_thread_priority,NULL);
 		}
-		//insert the element in the lock's list;
-		list_insert_ordered(&lock->lock_list, &node.elem, (list_less_func *) &sort_new_thread_priority,
-				NULL);
+		alter_readyList();
+
 	}
-	alter_readyList();
 	intr_set_level(old_level);
 	sema_down(&lock->semaphore);
 	lock->holder = thread_current();
@@ -232,6 +235,7 @@ void lock_release(struct lock *lock) {
 	ASSERT(lock_held_by_current_thread(lock));
 	enum intr_level old_level;
 	old_level = intr_disable();
+	if(!thread_mlfqs){
 	//restore the priorities
 	if (list_size(&lock->lock_list) > 0) {
 		//always the highest priority thread finishes execution and then releases lock first
@@ -245,10 +249,12 @@ void lock_release(struct lock *lock) {
 		}
 
 	}
-	lock->holder = NULL;
+	}
 	alter_readyList();
-	intr_set_level(old_level);
+	lock->holder = NULL;
 	sema_up(&lock->semaphore);
+	intr_set_level(old_level);
+
 }
 
 /* Returns true if the current thread holds LOCK, false

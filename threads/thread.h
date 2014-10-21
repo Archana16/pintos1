@@ -98,6 +98,9 @@ struct thread
     int64_t begin;
     int64_t ticks_to_sleep;
 
+    //for bsd
+    int nice;
+    int recent_cpu;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

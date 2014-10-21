@@ -19,7 +19,8 @@
  Used to detect stack overflow.  See the big comment at the top
  of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
-
+//global variable storing load average
+int load_average;
 /* List of processes in THREAD_READY state, that is, processes
  that are ready to run but not actually running. */
 static struct list ready_list;
@@ -86,10 +87,14 @@ static tid_t allocate_tid(void);
 void thread_init(void) {
 	ASSERT(intr_get_level() == INTR_OFF);
 
+	//initialize the global parameters
+
+	load_average = 0;
 	lock_init(&tid_lock);
 	list_init(&ready_list);
 	list_init(&all_list);
 	list_init(&sleeping_threads);
+
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread();
@@ -322,11 +327,10 @@ void thread_set_priority(int new_priority) {
 	if (current->priority <= current->old_priority)
 		current->priority = new_priority;
 	current->old_priority = new_priority;
-
-	if (!intr_context() && !list_empty(&ready_list)
-			&& list_entry(list_front(&ready_list), struct thread, elem)->priority
-					> current->priority)
-		thread_yield();
+	enum intr_level old_level;
+		old_level = intr_disable();
+		alter_readyList();
+		intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
@@ -356,7 +360,7 @@ int thread_get_recent_cpu(void) {
 	/* Not yet implemented. */
 	return 0;
 }
-
+
 /* Idle thread.  Executes when no other thread is ready to run.
 
  The idle thread is initially put on the ready list by
@@ -400,7 +404,7 @@ static void kernel_thread(thread_func *function, void *aux) {
 	function(aux); /* Execute the thread function. */
 	thread_exit(); /* If function() returns, kill the thread. */
 }
-
+
 /* Returns the running thread. */
 struct thread *
 running_thread(void) {
@@ -435,6 +439,10 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->old_priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	//bsd parameters
+	t->nice = 0;
+	t->recent_cpu = 0;
 
 	old_level = intr_disable();
 	list_push_back(&all_list, &t->allelem);
@@ -571,6 +579,7 @@ bool priority_comparison(const struct list_elem *ele1,
 	}
 	return false;
 }
+//TODO : give appropriate name.
 void alter_readyList(void) {
 	//this function makes sure every time a higher priority thread is scheduled
 	//by making the lower priority thread yield immediately - archana
@@ -580,7 +589,9 @@ void alter_readyList(void) {
 	struct thread *t = list_entry(list_front(&ready_list), struct thread, elem);
 	if (intr_context()) {
 		thread_ticks++;
-		if (thread_current()->priority < t->priority|| (thread_ticks >= TIME_SLICE && thread_current()->priority == t->priority)) {
+		if (thread_current()->priority < t->priority
+				|| (thread_ticks >= TIME_SLICE
+						&& thread_current()->priority == t->priority)) {
 			intr_yield_on_return();
 		}
 		return;
@@ -589,3 +600,5 @@ void alter_readyList(void) {
 		thread_yield();
 	}
 }
+
+
