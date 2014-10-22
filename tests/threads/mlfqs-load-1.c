@@ -46,7 +46,7 @@ test_mlfqs_load_1 (void)
   msg ("load average rose to 0.5 after %d seconds", elapsed);
 
   msg ("sleeping for another 10 seconds, please wait...");
-  timer_sleep (TIMER_FREQ * 10);
+  timer_sleep (TIMER_FREQ * 100);
 
   load_avg = thread_get_load_avg ();
   if (load_avg < 0)

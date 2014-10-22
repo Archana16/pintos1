@@ -1,4 +1,5 @@
 /* Starts 60 threads numbered 0 through 59.  Thread #i sleeps for
+
    (10+i) seconds, then spins in a loop for 60 seconds, then
    sleeps until a total of 120 seconds have passed.  Every 2
    seconds, starting 10 seconds in, the main thread prints the

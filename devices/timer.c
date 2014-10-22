@@ -78,15 +78,16 @@ int64_t timer_elapsed(int64_t then) {
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
  be turned on. */
 void timer_sleep(int64_t ticks) {
-	int64_t start = timer_ticks();
+
 
 	ASSERT(intr_get_level() == INTR_ON);
 	/* while (timer_elapsed (start) < ticks)
 	 thread_yield ();*/
 	//avoid busy waiting -- archana
-	thread_current()->ticks_to_sleep = ticks;
-	thread_current()->begin = start;
-	list_push_back(&sleeping_threads, &thread_current()->elem);
+	thread_current()->ticks_to_sleep = timer_ticks()+ticks;
+	thread_current()->begin = thread_current()->ticks_to_sleep;
+	if (strcmp(thread_current()->name, "idle") != 0)
+		list_push_back(&sleeping_threads, &thread_current()->elem);
 	enum intr_level old_level = intr_disable();
 	thread_block();
 	intr_set_level(old_level);
@@ -153,18 +154,17 @@ static void timer_interrupt(struct intr_frame *args UNUSED) {
 	ticks++;
 	wakeup_threads();
 	thread_tick();
-	/*if (thread_mlfqs) {
-		increment_recentcpu();
-		if (ticks % 4 == 0) { //for every fourth tick priority should be recalculated
-			calc_priority(thread_current());
-			alter_readyList(); // Tests if thread still has max priority
-		}
-		if (ticks % TIMER_FREQ == 0) { //once per every second
-			calc_load_average(); //calculate load average
-			recalculate(); // Recalculates recent_cpu and priority for all threads
-		}
+/*	if (thread_mlfqs) {
+				increment_recentcpu();
+				if (ticks % 4 == 0) { //for every fourth tick priority should be recalculated
+					thread_foreach(calc_priority,NULL);
+				}
+				if (ticks % 100 == 0) { //once per every second
+					calc_load_average(); //calculate load average
+					recent_cpu(); // Recalculates recent_cpu for all threads
+				}
+			}*/
 
-	}*/
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

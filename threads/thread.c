@@ -4,6 +4,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "devices/timer.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -11,6 +12,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "fp_calculations.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -95,7 +97,6 @@ void thread_init(void) {
 	list_init(&all_list);
 	list_init(&sleeping_threads);
 
-
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread();
 	init_thread(initial_thread, "main", PRI_DEFAULT);
@@ -123,6 +124,17 @@ void thread_start(void) {
 void thread_tick(void) {
 	struct thread *t = thread_current();
 	/* Update statistics. */
+	if (thread_mlfqs) {
+				increment_recentcpu();
+				if (timer_ticks() % 4 == 0) { //for every fourth tick priority should be recalculated
+					thread_foreach(calc_priority,NULL);
+				}
+				if (timer_ticks() % 100 == 0) { //once per every second
+					calc_load_average(); //calculate load average
+					recent_cpu(); // Recalculates recent_cpu for all threads
+				}
+			}
+
 	if (t == idle_thread)
 		idle_ticks++;
 #ifdef USERPROG
@@ -135,6 +147,7 @@ void thread_tick(void) {
 	/* Enforce preemption. */
 	if (++thread_ticks >= TIME_SLICE)
 		intr_yield_on_return();
+
 }
 
 /* Prints thread statistics. */
@@ -195,9 +208,9 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 	/* Add to run queue. */
 	thread_unblock(t);
 	enum intr_level old_level;
-	old_level = intr_disable ();
+	old_level = intr_disable();
 	alter_readyList();
-	intr_set_level (old_level);
+	intr_set_level(old_level);
 	return tid;
 }
 
@@ -328,9 +341,9 @@ void thread_set_priority(int new_priority) {
 		current->priority = new_priority;
 	current->old_priority = new_priority;
 	enum intr_level old_level;
-		old_level = intr_disable();
-		alter_readyList();
-		intr_set_level(old_level);
+	old_level = intr_disable();
+	alter_readyList();
+	intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
@@ -340,25 +353,30 @@ int thread_get_priority(void) {
 
 /* Sets the current thread's nice value to NICE. */
 void thread_set_nice(int nice UNUSED) {
-	/* Not yet implemented. */
+	enum intr_level old_level = intr_disable();
+	thread_current()->nice = nice;
+	//calculate new priority for all threads
+	thread_foreach(calc_priority,NULL);
+	//check if thread has max priority
+	alter_readyList();
+	intr_set_level(old_level);
 }
 
 /* Returns the current thread's nice value. */
 int thread_get_nice(void) {
-	/* Not yet implemented. */
-	return 0;
+	return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int thread_get_load_avg(void) {
-	/* Not yet implemented. */
-	return 0;
+	int temp = mult_mixed(load_average, 100);
+	return convert_fp_to_int_round(temp);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int thread_get_recent_cpu(void) {
-	/* Not yet implemented. */
-	return 0;
+	int temp = mult_mixed(thread_current()->recent_cpu, 100);
+	return convert_fp_to_int_round(temp);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -440,6 +458,7 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	t->old_priority = priority;
 	t->magic = THREAD_MAGIC;
 
+	t->ticks_to_sleep= 0;
 	//bsd parameters
 	t->nice = 0;
 	t->recent_cpu = 0;
@@ -556,11 +575,11 @@ uint32_t thread_stack_ofs = offsetof(struct thread, stack);
 
 //function to wake up threads --archana
 void wakeup_threads(void) {
-	struct thread *t = thread_current();
+	//struct thread *t = thread_current();
 	struct list_elem *thread_ele = list_begin(&sleeping_threads);
 	for (thread_ele = sleeping_threads.head.next; thread_ele->next != NULL;) {
 		struct thread *t = list_entry(thread_ele, struct thread, elem);
-		if (timer_elapsed(t->begin) >= t->ticks_to_sleep) {
+		if ((t->ticks_to_sleep <= timer_ticks()) || t->begin <= timer_ticks()) {
 			thread_ele = list_remove(&t->elem);
 			thread_unblock(t);
 		} else {
@@ -601,4 +620,112 @@ void alter_readyList(void) {
 	}
 }
 
+//function to increment recentcpu for every tick only for running thread
+void increment_recentcpu(void) {
+	if (thread_current() != idle_thread) {
+		thread_current()->recent_cpu = add_mixed(thread_current()->recent_cpu,1);
+	}
+}
 
+void recent_cpu(void) {
+	struct list_elem *e;
+	for (e = list_begin(&all_list); e != list_end(&all_list);
+			e = list_next(e)) {
+		struct thread *t = list_entry(e, struct thread, elem);
+		if (t == idle_thread) {
+			continue;
+		}
+		calc_recentcpu(t,NULL);
+		//calc_priority(t);
+	}
+}
+
+//function to calculate the recent cpu
+// recentcpu = (2*load_average/2*load_average+1) *recentcpu +nice
+void calc_recentcpu(struct thread *t, void* aux) {
+	if(t != idle_thread){
+		int temp = mult_mixed(load_average, 2);
+			temp = div_fp(temp, add_mixed(temp, 1));
+			temp = mult_fp(temp, t->recent_cpu);
+			t->recent_cpu = add_mixed(temp, t->nice);
+	}else{
+		t->recent_cpu = 0;
+	}
+
+}
+
+//function to calculate load average
+//load average= 59/60(load_average) + 1/60(no of ready threads)
+//this function is called once every second.
+void calc_load_average(void) {
+	//total no. of threads in ready_list plus the currently running threads
+	int ready_threads = list_size(&ready_list);
+	if (thread_current() != idle_thread) {
+		ready_threads += 1;
+	}
+	load_average = add_fp(div_mixed(mult_mixed(load_average, 59), 60),
+			div_mixed(convert_int_to_fp(ready_threads), 60));
+}
+
+void calc_priority(struct thread *t,void *aux) {
+	//set priority = PRI_MAX - (recent_cpu/4)- nice*2
+	int temp = convert_int_to_fp(PRI_MAX);
+	temp = sub_fp(temp, div_mixed(t->recent_cpu, 4));
+	temp = sub_mixed(temp, 2 * t->nice);
+	thread_current()->priority = convert_fp_to_int(temp);
+	if (thread_current()->priority < PRI_MIN) {
+		thread_current()->priority = PRI_MIN;
+	}
+	if (thread_current()->priority > PRI_MAX) {
+		thread_current()->priority = PRI_MAX;
+	}
+
+}
+
+//fp calculations not getting added
+/*
+#define f 2**14
+#define F (1 << 14)
+#define FP_MAX (1 << 17)
+*/
+
+int F =(1 << 14);
+int FP_MAX =(1 << 17);
+
+int convert_int_to_fp(int n) {
+	return n * F;
+}
+int convert_fp_to_int_round(int x) {
+	if (x >= 0) {
+		return (x + F / 2) / F;
+	} else {
+		return (x - F / 2) / F;
+	}
+}
+int convert_fp_to_int(int x) {
+	return x / F;
+}
+int add_fp(int x, int y) {
+	return x + y;
+}
+int add_mixed(int x, int n) {
+	return x + convert_int_to_fp(n);
+}
+int sub_fp(int x, int y) {
+	return x - y;
+}
+int sub_mixed(int x, int n) {
+	return x - convert_int_to_fp(n);
+}
+int mult_fp(int x, int y) {
+	return ((int64_t) x) * y / F;
+}
+int mult_mixed(int x, int n) {
+	return x * n;
+}
+int div_fp(int x, int y) {
+	return ((int64_t) x) * F / y;
+}
+int div_mixed(int x, int n) {
+	return x / n;
+}

@@ -153,6 +153,11 @@ void wakeup_threads(void);
 bool priority_comparison(const struct list_elem *, const struct list_elem *, void *aux) ;
 //function to yield the lower priority thread immediately-archana
 void alter_readyList(void);
+void increment_recentcpu(void);
+void recent_cpu(void);
+void calc_recentcpu(struct thread *t,void* aux);
+void calc_load_average(void);
+void calc_priority(struct thread *t,void *aux);
 
 struct list sleeping_threads;
 
