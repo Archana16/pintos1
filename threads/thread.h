@@ -93,6 +93,11 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    int lower_priority; //priority of thread should be lower
+    struct list unrecovered_list;
+    struct lock *acquire_lock;
+    int is_donee;
+
 
     //variable to keep track of sleep ticks -- archana
     int64_t begin;

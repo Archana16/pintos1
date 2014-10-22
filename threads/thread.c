@@ -125,15 +125,15 @@ void thread_tick(void) {
 	struct thread *t = thread_current();
 	/* Update statistics. */
 	if (thread_mlfqs) {
-				increment_recentcpu();
-				if (timer_ticks() % 4 == 0) { //for every fourth tick priority should be recalculated
-					thread_foreach(calc_priority,NULL);
-				}
-				if (timer_ticks() % 100 == 0) { //once per every second
-					calc_load_average(); //calculate load average
-					recent_cpu(); // Recalculates recent_cpu for all threads
-				}
-			}
+		increment_recentcpu();
+		if (timer_ticks() % 4 == 0) { //for every fourth tick priority should be recalculated
+			thread_foreach(calc_priority, NULL);
+		}
+		if (timer_ticks() % 100 == 0) { //once per every second
+			calc_load_average(); //calculate load average
+			recent_cpu(); // Recalculates recent_cpu for all threads
+		}
+	}
 
 	if (t == idle_thread)
 		idle_ticks++;
@@ -337,13 +337,15 @@ void thread_foreach(thread_action_func *func, void *aux) {
 void thread_set_priority(int new_priority) {
 	ASSERT(new_priority <= PRI_MAX && new_priority >= PRI_MIN);
 	struct thread *current = thread_current();
-	if (current->priority <= current->old_priority)
+	if (current->priority <= current->old_priority) {
 		current->priority = new_priority;
-	current->old_priority = new_priority;
-	enum intr_level old_level;
-	old_level = intr_disable();
-	alter_readyList();
-	intr_set_level(old_level);
+		current->old_priority = new_priority;
+		enum intr_level old_level;
+		old_level = intr_disable();
+		alter_readyList();
+		intr_set_level(old_level);
+	} else if (current->is_donee && new_priority < current->priority)
+		current->lower_priority = new_priority;
 }
 
 /* Returns the current thread's priority. */
@@ -355,8 +357,8 @@ int thread_get_priority(void) {
 void thread_set_nice(int nice UNUSED) {
 	enum intr_level old_level = intr_disable();
 	thread_current()->nice = nice;
-	//calculate new priority for all threads
-	thread_foreach(calc_priority,NULL);
+//calculate new priority for all threads
+	thread_foreach(calc_priority, NULL);
 	//check if thread has max priority
 	alter_readyList();
 	intr_set_level(old_level);
@@ -458,10 +460,15 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	t->old_priority = priority;
 	t->magic = THREAD_MAGIC;
 
-	t->ticks_to_sleep= 0;
+	t->ticks_to_sleep = 0;
 	//bsd parameters
 	t->nice = 0;
 	t->recent_cpu = 0;
+
+	list_init(&t->unrecovered_list);
+	t->acquire_lock = NULL;
+	t->is_donee = 0;
+	t->lower_priority = -1;
 
 	old_level = intr_disable();
 	list_push_back(&all_list, &t->allelem);
@@ -623,7 +630,8 @@ void alter_readyList(void) {
 //function to increment recentcpu for every tick only for running thread
 void increment_recentcpu(void) {
 	if (thread_current() != idle_thread) {
-		thread_current()->recent_cpu = add_mixed(thread_current()->recent_cpu,1);
+		thread_current()->recent_cpu = add_mixed(thread_current()->recent_cpu,
+				1);
 	}
 }
 
@@ -635,20 +643,20 @@ void recent_cpu(void) {
 		if (t == idle_thread) {
 			continue;
 		}
-		calc_recentcpu(t,NULL);
+		calc_recentcpu(t, NULL);
 		//calc_priority(t);
 	}
 }
 
 //function to calculate the recent cpu
 // recentcpu = (2*load_average/2*load_average+1) *recentcpu +nice
-void calc_recentcpu(struct thread *t, void* aux) {
-	if(t != idle_thread){
+void calc_recentcpu(struct thread *t, void * aux UNUSED) {
+	if (t != idle_thread) {
 		int temp = mult_mixed(load_average, 2);
-			temp = div_fp(temp, add_mixed(temp, 1));
-			temp = mult_fp(temp, t->recent_cpu);
-			t->recent_cpu = add_mixed(temp, t->nice);
-	}else{
+		temp = div_fp(temp, add_mixed(temp, 1));
+		temp = mult_fp(temp, t->recent_cpu);
+		t->recent_cpu = add_mixed(temp, t->nice);
+	} else {
 		t->recent_cpu = 0;
 	}
 
@@ -667,7 +675,7 @@ void calc_load_average(void) {
 			div_mixed(convert_int_to_fp(ready_threads), 60));
 }
 
-void calc_priority(struct thread *t,void *aux) {
+void calc_priority(struct thread *t, void *aux UNUSED) {
 	//set priority = PRI_MAX - (recent_cpu/4)- nice*2
 	int temp = convert_int_to_fp(PRI_MAX);
 	temp = sub_fp(temp, div_mixed(t->recent_cpu, 4));
@@ -684,13 +692,13 @@ void calc_priority(struct thread *t,void *aux) {
 
 //fp calculations not getting added
 /*
-#define f 2**14
-#define F (1 << 14)
-#define FP_MAX (1 << 17)
-*/
+ #define f 2**14
+ #define F (1 << 14)
+ #define FP_MAX (1 << 17)
+ */
 
-int F =(1 << 14);
-int FP_MAX =(1 << 17);
+int F = (1 << 14);
+int FP_MAX = (1 << 17);
 
 int convert_int_to_fp(int n) {
 	return n * F;

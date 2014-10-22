@@ -23,9 +23,9 @@ struct lock {
 	struct list lock_list;
 };
 /* Elem in a list */
-struct lock_list_element
+struct lock_list_node
 {
-	struct thread * donate_to;/* thread that gets upgraded */
+	struct thread * donee;/* thread that gets upgraded */
 	int new_thread_priority; /* priority of current thread */
 	int old_thread_priority; /* priority before donation */
 	struct list_elem elem;
