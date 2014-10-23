@@ -124,16 +124,6 @@ void thread_start(void) {
 void thread_tick(void) {
 	struct thread *t = thread_current();
 	/* Update statistics. */
-	if (thread_mlfqs) {
-		increment_recentcpu();
-		if (timer_ticks() % 4 == 0) { //for every fourth tick priority should be recalculated
-			thread_foreach(calc_priority, NULL);
-		}
-		if (timer_ticks() % 100 == 0) { //once per every second
-			calc_load_average(); //calculate load average
-			recent_cpu(); // Recalculates recent_cpu for all threads
-		}
-	}
 
 	if (t == idle_thread)
 		idle_ticks++;
@@ -466,7 +456,7 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	t->recent_cpu = 0;
 
 	list_init(&t->unrecovered_list);
-	t->acquire_lock = NULL;
+	t->lock_to_hold = NULL;
 	t->is_donee = 0;
 	t->lower_priority = -1;
 
@@ -630,8 +620,7 @@ void alter_readyList(void) {
 //function to increment recentcpu for every tick only for running thread
 void increment_recentcpu(void) {
 	if (thread_current() != idle_thread) {
-		thread_current()->recent_cpu = add_mixed(thread_current()->recent_cpu,
-				1);
+		thread_current()->recent_cpu = add_mixed(thread_current()->recent_cpu,1);
 	}
 }
 
@@ -689,13 +678,6 @@ void calc_priority(struct thread *t, void *aux UNUSED) {
 	}
 
 }
-
-//fp calculations not getting added
-/*
- #define f 2**14
- #define F (1 << 14)
- #define FP_MAX (1 << 17)
- */
 
 int F = (1 << 14);
 int FP_MAX = (1 << 17);

@@ -154,7 +154,7 @@ static void timer_interrupt(struct intr_frame *args UNUSED) {
 	ticks++;
 	wakeup_threads();
 	thread_tick();
-/*	if (thread_mlfqs) {
+	if (thread_mlfqs) {
 				increment_recentcpu();
 				if (ticks % 4 == 0) { //for every fourth tick priority should be recalculated
 					thread_foreach(calc_priority,NULL);
@@ -163,7 +163,7 @@ static void timer_interrupt(struct intr_frame *args UNUSED) {
 					calc_load_average(); //calculate load average
 					recent_cpu(); // Recalculates recent_cpu for all threads
 				}
-			}*/
+			}
 
 }
 

@@ -23,8 +23,7 @@ struct lock {
 	struct list lock_list;
 };
 /* Elem in a list */
-struct lock_list_node
-{
+struct lock_list_node {
 	struct thread * donee;/* thread that gets upgraded */
 	int new_thread_priority; /* priority of current thread */
 	int old_thread_priority; /* priority before donation */
@@ -38,6 +37,13 @@ bool lock_try_acquire(struct lock *);
 void lock_release(struct lock *);
 bool lock_held_by_current_thread(const struct lock *);
 
+/* One semaphore in a list. */
+struct semaphore_elem {
+	struct list_elem elem; /* List element. */
+	struct semaphore semaphore; /* This semaphore. */
+	int priority;
+};
+
 /* Condition variable. */
 struct condition {
 	struct list waiters; /* List of waiting threads. */
@@ -47,9 +53,11 @@ void cond_init(struct condition *);
 void cond_wait(struct condition *, struct lock *);
 void cond_signal(struct condition *, struct lock *);
 void cond_broadcast(struct condition *, struct lock *);
-
+void perform_donation(struct lock_list_node *node, struct lock *lock);
 //to sort the elements of the lock's list
-bool sort_new_thread_priority(struct list_elem *elem1,struct list_elem *elem2,void *aux);
+bool sort_new_thread_priority(struct list_elem *elem1, struct list_elem *elem2,
+		void *aux);
+bool sort_sema_with_priority(struct list_elem *elem1,struct list_elem *elem2,void *aux);
 
 /* Optimization barrier.
 

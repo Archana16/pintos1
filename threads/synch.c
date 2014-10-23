@@ -104,6 +104,7 @@ void sema_up(struct semaphore *sema) {
 	ASSERT(sema != NULL);
 
 	old_level = intr_disable();
+	sema->value++;
 	if (!list_empty(&sema->waiters))
 		thread_unblock(
 				list_entry(list_pop_front(&sema->waiters), struct thread,
@@ -179,34 +180,55 @@ bool sort_new_thread_priority(struct list_elem *elem1, struct list_elem *elem2,
 	struct lock_list_node *l2 = list_entry(elem2, struct lock_list_node, elem);
 	return l1->new_thread_priority > l2->new_thread_priority;
 }
+bool sort_sema_with_priority(struct list_elem *elem1, struct list_elem *elem2,
+		void *aux) {
+	struct semaphore_elem *s1 = list_entry(elem1, struct semaphore_elem, elem);
+	struct semaphore_elem *s2 = list_entry(elem2, struct semaphore_elem, elem);
+	return s1->priority > s2->priority;
+}
+
+void perform_donation(struct lock_list_node *node, struct lock *lock) {
+	node->donee = lock->holder; //save the thread which upgrades
+	node->old_thread_priority = lock->holder->priority; //save the lock holder's priority
+	lock->holder->priority = thread_current()->priority; //upgrade the holder's priority
+	lock->holder->is_donee += 1; //got one donation
+}
 void lock_acquire(struct lock *lock) {
 	ASSERT(lock != NULL);
 	ASSERT(!intr_context());
 	ASSERT(!lock_held_by_current_thread(lock));
-	//check if donation required
-	enum intr_level old_level;
-	old_level = intr_disable();
+
+	struct thread *cur = thread_current();
 	if (!thread_mlfqs) {
 		if (lock->semaphore.value == 0) {
-			struct lock_list_node node;
-			node.new_thread_priority = thread_current()->priority;
-			if (lock->holder->priority < thread_current()->priority) {
-				node.donee = lock->holder; //save the thread which upgrades
-				node.old_thread_priority = lock->holder->priority; //save the lock holder's priority
-				lock->holder->priority = thread_current()->priority; //upgrade the holder's priority
-				lock->holder->is_donee += 1; //got one donation
-			} else {
-				node.donee = NULL; //in the case donation is not required
+			struct lock *temp = lock;
+			while (lock) //as long as lock holder wants another lock
+			{
+				struct lock_list_node *node = (struct lock_list_node*) malloc(
+						sizeof(struct lock_list_node));
+				cur->lock_to_hold = lock; /* thread is acquiring the lock */
+				ASSERT(node != NULL)
+				node->new_thread_priority = thread_current()->priority;
+				//check if donation required
+				if (lock->holder->priority < thread_current()->priority)
+					perform_donation(node, lock);
+				else
+					node->donee = NULL; //in the case donation is not required
+				//insert the element in the lock's list;
+				list_insert_ordered(&lock->lock_list, &node->elem,
+						(list_less_func *) &sort_new_thread_priority, NULL);
+				lock = lock->holder->lock_to_hold;
 			}
-			//insert the element in the lock's list;
-			list_insert_ordered(&lock->lock_list, &node.elem,
-					(list_less_func *) &sort_new_thread_priority, NULL);
+			lock = temp;
 		}
+		enum intr_level old_level;
+		old_level = intr_disable();
 		alter_readyList();
-
+		intr_set_level(old_level);
 	}
-	intr_set_level(old_level);
+
 	sema_down(&lock->semaphore);
+	cur->lock_to_hold = NULL;
 	lock->holder = thread_current();
 }
 
@@ -247,23 +269,30 @@ void lock_release(struct lock *lock) {
 		if (list_size(&lock->lock_list) > 0) {
 			struct lock_list_node *lock_node, *unrecover_list_node;
 			struct list_elem *lock_e, *unrecover_e;
-			lock_node = list_entry(list_pop_front(&lock->lock_list),struct lock_list_node, elem);
+			lock_node = list_entry(list_pop_front(&lock->lock_list),
+					struct lock_list_node, elem);
 			if (lock_node->new_thread_priority < lock_node->donee->priority) {
 				/* can not restore now because the lock's holder were donated
 				 by other high priority thread. Need to save this info*/
-				list_insert_ordered(&lock_node->donee->unrecovered_list,&lock_node->elem,(list_less_func *) &sort_new_thread_priority, NULL);
+				list_insert_ordered(&lock_node->donee->unrecovered_list,
+						&lock_node->elem,
+						(list_less_func *) &sort_new_thread_priority, NULL);
 			} else {
 				//priority can be restored now
 				restore_priority(lock_node);
 				//take care when thread releases lock but has not restored the priorities
 				int old_priority = lock_node->old_thread_priority;
 				while (!list_empty(&lock_node->donee->unrecovered_list)) {
-					unrecover_list_node = list_entry(list_begin(&lock_node->donee->unrecovered_list),struct lock_list_node, elem);
-					if (unrecover_list_node->new_thread_priority== old_priority) {
+					unrecover_list_node = list_entry(
+							list_begin(&lock_node->donee->unrecovered_list),
+							struct lock_list_node, elem);
+					if (unrecover_list_node->new_thread_priority
+							== old_priority) {
 						restore_priority(unrecover_list_node);
-						list_pop_front(&unrecover_list_node->donee->unrecovered_list);
+						list_pop_front(
+								&unrecover_list_node->donee->unrecovered_list);
 					} else
-					break;
+						break;
 				}
 			}
 			if (lock_node->donee->is_donee == 0
@@ -291,12 +320,6 @@ bool lock_held_by_current_thread(const struct lock *lock) {
 
 	return lock->holder == thread_current();
 }
-
-/* One semaphore in a list. */
-struct semaphore_elem {
-	struct list_elem elem; /* List element. */
-	struct semaphore semaphore; /* This semaphore. */
-};
 
 /* Initializes condition variable COND.  A condition variable
  allows one piece of code to signal a condition and cooperating
@@ -336,7 +359,9 @@ void cond_wait(struct condition *cond, struct lock *lock) {
 	ASSERT(lock_held_by_current_thread(lock));
 
 	sema_init(&waiter.semaphore, 0);
-	list_push_back(&cond->waiters, &waiter.elem);
+	//should be sorted
+	list_insert_ordered(&cond->waiters, &waiter.elem,
+			(list_less_func *) &sort_sema_with_priority, NULL);
 
 	lock_release(lock);
 	sema_down(&waiter.semaphore);

@@ -95,7 +95,7 @@ struct thread
     struct list_elem elem;              /* List element. */
     int lower_priority; //priority of thread should be lower
     struct list unrecovered_list;
-    struct lock *acquire_lock;
+    struct lock *lock_to_hold;
     int is_donee;
 
 
